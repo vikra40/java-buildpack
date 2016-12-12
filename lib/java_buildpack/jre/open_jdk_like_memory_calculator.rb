@@ -20,6 +20,8 @@ require 'java_buildpack/jre'
 require 'java_buildpack/util/shell'
 require 'java_buildpack/util/qualify_path'
 require 'open3'
+require 'tmpdir'
+require 'zip'
 
 module JavaBuildpack
   module Jre
@@ -74,24 +76,39 @@ module JavaBuildpack
       end
 
       def memory_calculation_string(relative_path)
-        "#{qualify_path memory_calculator, relative_path} -memorySizes=#{memory_sizes @configuration} " \
-              "-memoryWeights=#{memory_weights @configuration} -memoryInitials=#{memory_initials @configuration}" \
-              "#{stack_threads @configuration} -totMemory=$MEMORY_LIMIT"
+        "#{qualify_path memory_calculator, relative_path} " \
+              '-totMemory=$MEMORY_LIMIT ' \
+              "-stackThreads=#{stack_threads @configuration} " \
+              "-loadedClasses=#{app_class_files_count @configuration}" \
+              "#{vm_options @configuration}"
       end
 
-      def memory_sizes(configuration)
-        memory_sizes = version_specific configuration['memory_sizes']
-        memory_sizes.map { |k, v| "#{k}:#{v}" }.join(',')
+      def app_class_files_count(configuration)
+        configuration['class_count'] ? configuration['class_count'] : count_dir_classes(@application.root, 0)
       end
 
-      def memory_weights(configuration)
-        memory_heuristics = version_specific configuration['memory_heuristics']
-        memory_heuristics.map { |k, v| "#{k}:#{v}" }.join(',')
+      def count_dir_classes(application_root, count)
+        application_root.each_child do |child|
+          count += 1 if child.basename.to_s.end_with?('.class', '.groovy')
+          count = count_dir_classes(child, count) if child.directory?
+          next unless child.basename.to_s.end_with?('.war', '.jar')
+          count = count_archive(child, count)
+        end
+        count
       end
 
-      def memory_initials(configuration)
-        memory_initials = version_specific configuration['memory_initials']
-        memory_initials.map { |k, v| "#{k}:#{v}" }.join(',')
+      def count_archive(file, count)
+        Zip::File.open(file) do |zip_file|
+          zip_file.each do |entry|
+            count += 1 if entry.name.end_with?('.class', '.groovy')
+            next unless entry.name.end_with?('.war', '.jar')
+            Dir.mktmpdir do |dir|
+              entry.extract("#{dir}/archive")
+              count = count_archive("#{dir}/archive", count)
+            end
+          end
+        end
+        count
       end
 
       def unpack_calculator(file)
@@ -104,17 +121,13 @@ module JavaBuildpack
       end
 
       def stack_threads(configuration)
-        configuration['stack_threads'] ? " -stackThreads=#{configuration['stack_threads']}" : ''
+        configuration['stack_threads']
       end
 
-      def version_specific(configuration)
-        if @droplet.java_home.java_8_or_later?
-          configuration.delete 'permgen'
-        else
-          configuration.delete 'metaspace'
-        end
-
-        configuration
+      def vm_options(configuration)
+        return '' unless configuration['vm_options']
+        options = configuration['vm_options'].map { |k, v| "-#{k}#{v}" }.join(' ')
+        " -vmOptions=\"#{options}\""
       end
 
       def show_settings(*args)
@@ -122,9 +135,7 @@ module JavaBuildpack
           status         = wait_thr.value
           stderr_content = stderr.gets nil
           stdout_content = stdout.gets nil
-
           puts "       #{stderr_content}" if stderr_content
-
           raise unless status.success?
           puts "       Memory Settings: #{stdout_content}"
         end

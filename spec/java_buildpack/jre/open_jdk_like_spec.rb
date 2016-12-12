@@ -38,18 +38,7 @@ describe JavaBuildpack::Jre::OpenJDKLike do
 
   let(:jre_configuration) { instance_double('jre_configuration') }
 
-  let(:memory_calculator_configuration) do
-    { 'memory_sizes'      => { 'metaspace' => '64m..',
-                               'permgen'   => '64m..' },
-      'memory_heuristics' => { 'heap'      => '75',
-                               'metaspace' => '10',
-                               'permgen'   => '10',
-                               'stack'     => '5',
-                               'native'    => '10' },
-      'memory_initials'   => { 'heap'      => '100%',
-                               'metaspace' => '100%',
-                               'permgen'   => '100%' } }
-  end
+  let(:memory_calculator_configuration) { { 'stack_threads' => '200' } }
 
   it 'always supports' do
     expect(component.supports?).to be
@@ -69,10 +58,9 @@ describe JavaBuildpack::Jre::OpenJDKLike do
   it 'returns command' do
     java_home.version = version_7
     expect(component.command).to eq('CALCULATED_MEMORY=$($PWD/.java-buildpack/open_jdk_like/bin/' \
-                                    'java-buildpack-memory-calculator-0.0.0 -memorySizes=permgen:64m.. ' \
-                                    '-memoryWeights=heap:75,permgen:10,stack:5,native:10 ' \
-                                    '-memoryInitials=heap:100%,permgen:100% ' \
-                                    '-totMemory=$MEMORY_LIMIT)')
+                                    'java-buildpack-memory-calculator-0.0.0 -totMemory=$MEMORY_LIMIT' \
+                                    ' -stackThreads=200 -loadedClasses=0)')
+
   end
 
 end
